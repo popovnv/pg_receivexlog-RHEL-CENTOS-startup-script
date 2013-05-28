@@ -1,0 +1,110 @@
+ #!/bin/bash
+# pg_receivexlog daemon
+# chkconfig: 345 20 80
+# description: pg_receivexlog daemon
+# processname: pg_receivexlog
+
+# Version 9.2.3 Gilles Fauvie <gfa@opendbteam.com>
+# First version
+
+DAEMON_PATH="/var/lib/pgsql"
+
+DAEMON=pg_receivexlog
+
+
+NAME=pg_receivexlog
+DESC="Used to stream transaction log from a running PostgreSQL cluster"
+
+SCRIPTNAME=/etc/init.d/$NAME
+
+# Source function library.
+INITD=/etc/rc.d/init.d
+. $INITD/functions
+
+# For SELinux we need to use 'runuser' not 'su'
+if [ -x /sbin/runuser ]
+then
+    SU=runuser
+else
+    SU=su
+fi
+
+# Set defaults for configuration variables
+PGENGINE=/usr/pgsql-9.2/bin
+PGHOST=127.0.0.1
+PGPORT=5433
+PGUSER=postgres
+PGARCHIVEDIR=/PGarchiveDir
+PGRXLOG=/var/log/pg_receivexlog.log
+PIDFILE=/var/run/pg_receivexlog.pid
+
+
+case "$1" in
+start)
+    
+	
+    # Make sure that pgbouncer is not already running:
+    if [ -f $PIDFILE ]
+    then
+        echo "${NAME} is already running"
+        echo_failure
+        echo
+        exit 1
+    fi
+
+    PSQL_START=$"Starting ${NAME} service: "
+    echo -n $PSQL_START
+
+
+	$SU -l postgres -c "$PGENGINE/pg_receivexlog -U $PGUSER -p '$PGPORT' -h '$PGHOST' -D '$PGARCHIVEDIR' &" >> "$PGRXLOG" 2>&1 < /dev/null
+    sleep 2
+    PIDTEMP=`pidof -s $NAME`
+    echo $PIDTEMP > $PIDFILE
+    pid=`head -n 1 "$PIDFILE" 2>/dev/null`
+    if [ "x$pid" != x ]
+    then
+        echo_success
+        echo
+    else
+        echo_failure
+        echo
+        script_result=1
+    fi
+;;
+status)
+        printf "%-50s" "Checking $NAME..."
+        if [ -f $PIDFILE ]; then
+            PID=`cat $PIDFILE`
+            if [ -z "`ps axf | grep ${PID} | grep -v grep`" ]; then
+                printf "%s\n" "Process dead but pidfile exists"
+            else
+                echo "Running"
+            fi
+        else
+            printf "%s\n" "Service not running"
+        fi
+;;
+stop)
+        echo -n "Stopping $NAME service: "
+            PID=`cat $PIDFILE`
+        if [ -f $PIDFILE ]; then
+            kill -HUP $PID
+            echo_success
+            echo
+            rm -f $PIDFILE
+        else
+            printf "%s\n" "pidfile not found"
+            echo_failure
+            echo
+        fi
+;;
+
+restart)
+  	$0 stop
+  	$0 start
+;;
+
+*)
+        echo "Usage: $0 {status|start|stop|restart}"
+        exit 1
+esac 
