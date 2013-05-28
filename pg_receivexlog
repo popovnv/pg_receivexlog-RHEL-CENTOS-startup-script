@@ -4,15 +4,22 @@
 # description: pg_receivexlog daemon
 # processname: pg_receivexlog
 
+# Version 9.2.3 Gilles Fauvie <gfa@opendbteam.com>
+# First version
+
 DAEMON_PATH="/var/lib/pgsql"
 
 DAEMON=pg_receivexlog
 
 
 NAME=pg_receivexlog
-DESC="My daemon description"
-PIDFILE=/var/run/$NAME.pid
+DESC="Used to stream transaction log from a running PostgreSQL cluster"
+
 SCRIPTNAME=/etc/init.d/$NAME
+
+# Source function library.
+INITD=/etc/rc.d/init.d
+. $INITD/functions
 
 # For SELinux we need to use 'runuser' not 'su'
 if [ -x /sbin/runuser ]
@@ -27,26 +34,42 @@ PGENGINE=/usr/pgsql-9.2/bin
 PGHOST=127.0.0.1
 PGPORT=5433
 PGUSER=postgres
-PGDATA=/PGdataDir/9.2/pgsql/data
 PGARCHIVEDIR=/PGarchiveDir
-PGLOG=/var/lib/pgsql/9.2/pgstartup.log
-# Log file for pg_upgrade
-PGUPLOG=/var/lib/pgsql/$PGMAJORVERSION/pgupgrade.log
-
-DAEMONOPTS="-h $PGHOST -U $PGUSER -p $PGPORT -D $PGARCHIVEDIR"
+PGRXLOG=/var/log/pg_receivexlog.log
+PIDFILE=/var/run/pg_receivexlog.pid
 
 
 case "$1" in
 start)
-	printf "%-50s" "Starting $NAME..."
-	cd $DAEMON_PATH
-	PID=`$DAEMON $DAEMONOPTS > /dev/null 2>&1 & echo $!`
-        if [ -z $PID ]; then
-            printf "%s\n" "Fail"
-        else
-            echo $PID > $PIDFILE
-            printf "%s\n" "Ok"
-        fi
+    
+	
+    # Make sure that pgbouncer is not already running:
+    if [ -f $PIDFILE ]
+    then
+        echo "${NAME} is already running"
+        echo_failure
+        echo
+        exit 1
+    fi
+
+    PSQL_START=$"Starting ${NAME} service: "
+    echo -n $PSQL_START
+
+
+	$SU -l postgres -c "$PGENGINE/pg_receivexlog -U $PGUSER -p '$PGPORT' -h '$PGHOST' -D '$PGARCHIVEDIR' &" >> "$PGRXLOG" 2>&1 < /dev/null
+    sleep 2
+    PIDTEMP=`pidof -s $NAME`
+    echo $PIDTEMP > $PIDFILE
+    pid=`head -n 1 "$PIDFILE" 2>/dev/null`
+    if [ "x$pid" != x ]
+    then
+        echo_success
+        echo
+    else
+        echo_failure
+        echo
+        script_result=1
+    fi
 ;;
 status)
         printf "%-50s" "Checking $NAME..."
@@ -62,15 +85,17 @@ status)
         fi
 ;;
 stop)
-        printf "%-50s" "Stopping $NAME"
+        echo -n "Stopping $NAME service: "
             PID=`cat $PIDFILE`
-            cd $DAEMON_PATH
         if [ -f $PIDFILE ]; then
             kill -HUP $PID
-            printf "%s\n" "Ok"
+            echo_success
+            echo
             rm -f $PIDFILE
         else
             printf "%s\n" "pidfile not found"
+            echo_failure
+            echo
         fi
 ;;
 
